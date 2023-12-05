@@ -1,3 +1,0 @@
-[submodule "src/particle_filter"]
-	path = src/particle_filter
-	url = https://github.com/CL2-UWaterloo/particle_filter.git
