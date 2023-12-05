@@ -52,7 +52,7 @@ private:
 
     //global static (to be shared by all objects) and dynamic variables (each instance gets its own copy -> managed on the stack)
     //std::string lidarscan_topic = "/scan";
-    std::string odom_topic = "/ego_racecar/odom";
+    std::string odom_topic = "/odom";
     std::string point_topic = "/clicked_point";
     std::string point_topic_rviz = "/waypoint_point_rviz";
     std::string odom_topic_rviz = "/waypoint_odom_rviz";
@@ -96,7 +96,7 @@ private:
     }
 
     void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_submsgObj) {   
-        csvFile_odom.open("/sim_ws/src/waypoint_generator/src/waypoints_odom.csv", std::ios::out | std::ios::app);
+        csvFile_odom.open("/home/f1tenth/f1tenth_ws_waterloo/f1tenth_ws/src/waypoint_generator/src/waypoints_odom.csv", std::ios::out | std::ios::app);
 
         double diff = sqrt(pow((odom_submsgObj->pose.pose.position.x-x_old),2)+pow((odom_submsgObj->pose.pose.position.y-y_old),2));
 

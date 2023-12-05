@@ -79,6 +79,7 @@ public:
 
 private:
     //global static (to be shared by all objects) and dynamic variables (each instance gets its own copy -> managed on the stack)
+    geometry_msgs::msg::Quaternion odom_quat;
     struct csvFileData{
         std::vector<double> X;
         std::vector<double> Y;
@@ -220,67 +221,60 @@ private:
     }
 
     void get_waypoint() {
-        double longest_distance = 0;
-        int final_i = -1;
-        // Main logic: Search within the next 500 points
-        int start = waypoints.index;
-        int end = (waypoints.index + 500) % num_waypoints;
-        
-        // Lookahead needs to be between the min_lookhead and the max_lookahead
-        double lookahead = std::min(std::max(min_lookahead, max_lookahead * curr_velocity / lookahead_ratio), max_lookahead); 
-        
-        
-        if (end < start) { // If we need to loop around
-            for (int i=start; i<num_waypoints; i++) {
-                if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) <= lookahead 
-                && p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) >= longest_distance) {
-                    longest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
-                    final_i = i;
-                }
-            }
-            for (int i=0; i<end; i++) {
-                if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) <= lookahead 
-                && p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) >= longest_distance) {
-                    longest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
-                    final_i = i;
-                }
-            }
-        } else {
-            for (int i=start; i<end; i++) {
-                if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) <= lookahead 
-                && p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) >= longest_distance) {
-                    longest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
-                    final_i = i;
-                }
-            }
+    double longest_distance = 0;
+    int final_i = -1;
+    // Set the search range for waypoints
+    int start = waypoints.index;
+    int end = (start + 500) % num_waypoints;
 
-        }
+    double lookahead = std::min(std::max(min_lookahead, max_lookahead * curr_velocity / lookahead_ratio), max_lookahead); 
 
-        if (final_i == -1) { // if we haven't found anything, search from the beginning
-            final_i = 0; // Temporarily assign to 0
-            for (unsigned int i=0;i<waypoints.X.size(); i++) {
-                if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) <= lookahead 
-                && p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) >= longest_distance) {
-                    longest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
-                    final_i = i;
-                }
+    // Extract the vehicle's orientation from the odometry message
+    double vehicle_heading = atan2(2.0 * (odom_quat.z * odom_quat.w + odom_quat.x * odom_quat.y), 1.0 - 2.0 * (odom_quat.y * odom_quat.y + odom_quat.z * odom_quat.z));
+
+    auto checkWaypoint = [&](int i) {
+        double dx = waypoints.X[i] - x_car_world;
+        double dy = waypoints.Y[i] - y_car_world;
+        double waypoint_angle = atan2(dy, dx);
+        double angle_diff = abs(waypoint_angle - vehicle_heading);
+
+        // Check if waypoint is in front of the vehicle and within lookahead distance
+        if ((angle_diff < M_PI_2 || angle_diff > 3 * M_PI_2) && p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) <= lookahead) {
+            if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) > longest_distance) {
+                longest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
+                final_i = i;
             }
         }
-        
-        // Find the closest point to the car, and use the velocity index for that
-        double shortest_distance = p2pdist(waypoints.X[0], x_car_world, waypoints.Y[0], y_car_world);
-        int velocity_i = 0;
-        for (int i=0; i<waypoints.X.size(); i++) {
-            if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) <= shortest_distance) {
-                shortest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
-                velocity_i = i;
-            }
-        }
+    };
 
-        // If a waypoint is not found within our radius, then waypoints.index = 0
-        waypoints.index = final_i; 
-        waypoints.velocity_index = velocity_i;
+    // Iterate over the waypoint range to find the best waypoint
+    for (int i = start; i != end; i = (i + 1) % num_waypoints) {
+        checkWaypoint(i);
     }
+
+    if (final_i != -1) {
+        waypoints.index = final_i; 
+    } else if (final_i == -1 && longest_distance == 0) {
+        // This handles the case when no waypoint is found within the lookahead distance
+        waypoints.index = (waypoints.index + 1) % num_waypoints; // Move to the next waypoint
+    }
+
+    // Find the closest point to the car, and use the velocity index for that
+    double shortest_distance = p2pdist(waypoints.X[start], x_car_world, waypoints.Y[start], y_car_world);
+    int velocity_i = start;
+    for (int i = start; i != end; i = (i + 1) % num_waypoints) {
+        if (p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world) < shortest_distance) {
+            shortest_distance = p2pdist(waypoints.X[i], x_car_world, waypoints.Y[i], y_car_world);
+            velocity_i = i;
+        }
+    }
+
+    waypoints.velocity_index = velocity_i;
+}
+
+
+
+
     
     void get_waypoint_obstacle_avoidance() {
         /*
@@ -384,6 +378,7 @@ private:
     }
 
     void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr odom_submsgObj) {
+        odom_quat = odom_submsgObj->pose.pose.orientation;
         x_car_world = odom_submsgObj->pose.pose.position.x;
         y_car_world = odom_submsgObj->pose.pose.position.y;
         // interpolate between different way-points 
